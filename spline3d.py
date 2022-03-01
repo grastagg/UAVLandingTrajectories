@@ -135,7 +135,7 @@ def spherical_obstalce(obstacles,spl_p):
     return dist
 
 def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
-                              v_upper_limit,a_lower_limit,a_upper_limit,t0,tf_initial,num_samples,obstacles):
+                              v_upper_limit,a_lower_limit,a_upper_limit,t0,tf_initial,num_samples,obstacles,min_decent_angle,max_decent_angle):
     '''
     :param p0: initial position of the vehicle (x,y,z)
     :param p1: desired landing position of the vehicle (x,y,z)
@@ -207,12 +207,17 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
         #check if path is outside obsticales
         obsticle_dist = spherical_obstalce(obstacles,spl_p)
 
+        #calculate the decent angle
+        decent_angle = np.pi/2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)) , z_dot)
+
+
         #add objective and constraints to funcs dict
         funcs['dist'] = dist
         funcs["time"] = tf
         funcs["velocity"] = v
         funcs['acceleration'] = a
         funcs['obstacle'] = obsticle_dist
+        funcs['decent_angle'] = decent_angle
 
         fail = False
 
@@ -258,6 +263,7 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
     optProb.addConGroup("velocity", num_samples, lower=v_lower_limit, upper=v_upper_limit, scale=1.0 / v_upper_limit)
     optProb.addConGroup("acceleration", num_samples, lower=a_lower_limit, upper=a_upper_limit, scale=1.0 / a_upper_limit)
     optProb.addConGroup("obstacle", num_samples*len(obstacles), lower=0, upper=None)
+    optProb.addConGroup("decent_angle", num_samples, lower=min_decent_angle, upper=max_decent_angle)
 
 
 
@@ -340,7 +346,7 @@ def main():
     v0 = np.array([0,-2,0])
     vf =np.array([0,-5,-.1])
 
-    num_cont_points = 7
+    num_cont_points = 8
 
     lb = -100
     ub = 100
@@ -354,10 +360,15 @@ def main():
 
     num_samples = 20
 
+    #decent/accent angle limits
+    min_decent_angle = -np.deg2rad(20)
+    max_decent_angle = np.deg2rad(20) #I guess this could be called max accent?
+
+
     #list of obstacles
     num_obst = 0
-    x_lim= [-.1,.1]
-    y_lim = [-.1,.1]
+    x_lim= [-10,10]
+    y_lim = [-10,10]
     z_lim = [3,6]
     min_radius = 1
     max_radius = 3
@@ -366,7 +377,8 @@ def main():
 
 
     spl = min_func_spline_trajectory(p0, pf, v0, vf, k, num_cont_points, lb, ub, v_lower_limit,
-                              v_upper_limit, a_lower_limit, a_upper_limit, t0, tf_initial, num_samples,obstacles)
+                              v_upper_limit, a_lower_limit, a_upper_limit, t0, tf_initial,
+                                    num_samples,obstacles,min_decent_angle,max_decent_angle)
 
     ax = plt.axes(projection='3d')
     plot_spline(spl,100,ax)
