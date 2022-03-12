@@ -6,6 +6,8 @@ from pyoptsparse import Optimization, OPT
 
 from Spherical_Object import Spherical_Object
 
+from scipy.optimize import minimize
+
 def create_spline(t0,tf,c,k,p0,pf,v0,vf):
     '''
     :param t0: start and stop time of the spline (t0,t1)
@@ -279,7 +281,136 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
 
     return spl
 
-def plot_velocity_and_acceleration(spl,v_lower_limit,v_upper_limit,a_lower_limit,a_upper_limit,num_samples):
+
+def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
+                              v_upper_limit,a_lower_limit,a_upper_limit,t0,tf_initial,num_samples,obstacles,min_decent_angle,max_decent_angle):
+    '''
+    This is the function for gradient free optimization of our problem, the constraints are added as penelty terms
+    :param p0: initial position of the vehicle (x,y,z)
+    :param p1: desired landing position of the vehicle (x,y,z)
+    :param v0: initial velocity of the vehicle (vx,vy,vz)
+    :param vf: landing velocity of the vehicle (vx,vy,vz)
+    :param k: order of the b-spline trajectory
+    :param num_cont_points: number of control points (4 will be fixed by initial and final conditions)
+    :param lb: lower bound of control point location (set to level of ground to ensure trajecotory does not go beneath surface FIX THIS!!!
+    :param ub: upper bound of control point location
+    :param v_lower_limit: minimum norm of the velocity of the vehicle (i.e. make sure above stall speed for fixed wing)
+    :param v_upper_limit: maximum norm of the velocity of vehicle
+    :param a_lower_limit: Minimum norm of acceleration of the vehicle
+    :param a_upper_limit: Maximum norm of acceleration of the vehicle
+    :param t0: start time of the spline (usually set to 0)
+    :param tf_initial: initial condition for end time of spline
+    :param num_samples: number of discrete points on spline to check acceleration and velocity
+    :return: optimal spline trajectory
+    '''
+
+    def objfunc(x0):
+
+        nonlocal t0, k, p0, p1, v0, vf, num_samples, obstacles, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit, min_decent_angle, max_decent_angle
+
+        mu = 10000
+        # extract control points and final time from input dict
+        x = x0[0:-1]
+        tf = x0[-1]
+
+        # if tf < 0:
+        #     return 10000
+
+        funcs = {}
+
+        # reshape control points
+        x = x.reshape(num_cont_points - 4, len(p0))
+
+        # create spline from control points and intitial and final conditions
+        spl = create_spline(t0, tf, x, k, p0, p1, v0, vf)
+
+        # create discrete set of times to sample spline at
+        t = np.linspace(t0, tf, num_samples, endpoint=True)
+
+        # spl_p = spl(t)
+
+        # evaluate the first derivative of the spline
+        spl_d = spl.derivative(1)(t)
+
+        # extract derivative in all directions
+        x_dot = spl_d[:, 0]
+        y_dot = spl_d[:, 1]
+        z_dot = spl_d[:, 2]
+
+        # evaluate the first derivative of the spline
+        spl_dd = spl.derivative(2)(t)
+        x_ddot = spl_dd[:, 0]
+        y_ddot = spl_dd[:, 1]
+        z_ddot = spl_dd[:, 2]
+
+        # euclidean norm of the velocity
+        v = np.sqrt(np.square(x_dot) + np.square(y_dot) + np.square(z_dot))
+
+        # euclidean norm of the accelerations
+        a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
+
+        # calculate the decent angle
+        decent_angle = np.pi / 2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)), z_dot)
+
+        # create the penalty part of the objective
+        g1 = np.maximum(0, -v_upper_limit + v)
+        g2 = np.maximum(0, v_lower_limit - v)
+        g3 = np.maximum(0, -a_upper_limit + a)
+        g4 = np.maximum(0, a_lower_limit - a)
+        g5 = np.maximum(0, -max_decent_angle + decent_angle)
+        g6 = np.maximum(0, min_decent_angle - decent_angle)
+
+        # sum of squared penalties
+        sum_g = np.sum(np.square(g1)) + np.sum(np.square(g2)) + np.sum(np.square(g3)) + np.sum(np.square(g4)) + np.sum(
+            np.square(g5)) + np.sum(np.square(g6))
+
+        # add objective and constraints to funcs dict
+        obj = tf + mu * sum_g
+
+        return obj
+
+
+
+##fix this trying to create evenely spaced initial intermediate control points
+    x0 = np.zeros(len(p0) * (num_cont_points - 4) + 1) #added 1 so I can add tf variable to end of vector
+    dx = (p1[0] - p0[0]) / (num_cont_points - 3)
+    dy = (p1[1] - p0[1]) / (num_cont_points - 3)
+    dz = (p1[2] - p0[2]) / (num_cont_points - 3)
+    x_0 = np.linspace(p0[0] + dx, p1[0] - dx, (num_cont_points - 4))
+    y0 = np.linspace(p0[1] + dy, p1[1] - dy, (num_cont_points - 4))
+    z0 = np.linspace(p0[2] + dz, p1[2] - dz, (num_cont_points - 4))
+    ind = 0
+    for i in range(len(x_0)-1):
+        x0[ind] = x_0[i]
+        ind += 1
+        x0[ind] = y0[i]
+        ind += 1
+        x0[ind] = z0[i]
+        ind += 1
+    x0[-1] = tf_initial
+    print("x0", x0)
+
+    # create lower bound for control points, optimizer sorts control points into x as [x1,y1,z1,x2,y2,z2,...
+    # so every third element of the lower bound needs to be 0 to ensure trajectory does not cross below ground
+    low_b = np.zeros(len(x0))
+    for i in range(len(low_b)):
+        #check if it is not the third,sixth,... element
+        if not (i+1) % 3 == 0:
+
+            low_b[i] = lb
+
+    options = {'maxiter': 10000}
+    sol = minimize(objfunc, x0, method="Nelder-Mead", options=options)
+
+
+    print(sol)
+    c = sol.x[0:-1].reshape(num_cont_points - 4, len(p0))
+    tf = sol.x[-1]
+    spl = create_spline(t0, tf, c, k, p0, p1, v0, vf)
+    return spl
+
+
+def plot_constraints(spl, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit, min_angle, max_angle, num_samples):
     t0 = spl.t[0]
     tf = spl.t[-1]
 
@@ -299,8 +430,10 @@ def plot_velocity_and_acceleration(spl,v_lower_limit,v_upper_limit,a_lower_limit
     # norm of the accelerations
     a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
 
+    # calculate the decent angle
+    decent_angle = np.pi / 2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)), z_dot)
 
-    fig, axs = plt.subplots(2)
+    fig, axs = plt.subplots(3)
     axs[0].plot(t,v,c='b')
     axs[0].plot(t, v_lower_limit*np.ones(len(t)),c='r')
     axs[0].plot(t, v_upper_limit * np.ones(len(t)),c='r')
@@ -309,6 +442,10 @@ def plot_velocity_and_acceleration(spl,v_lower_limit,v_upper_limit,a_lower_limit
     axs[1].plot(t, a_lower_limit*np.ones(len(t)),c='r')
     axs[1].plot(t, a_upper_limit * np.ones(len(t)),c='r')
     axs[1].title.set_text("Acceraltion")
+    axs[2].plot(t, decent_angle,c='b')
+    axs[2].plot(t, min_angle*np.ones(len(t)),c='r')
+    axs[2].plot(t, max_angle * np.ones(len(t)),c='r')
+    axs[2].title.set_text("pitch angle")
     plt.tight_layout()
     plt.show()
 
@@ -361,8 +498,8 @@ def main():
     num_samples = 20
 
     #decent/accent angle limits
-    min_decent_angle = -np.deg2rad(20)
-    max_decent_angle = np.deg2rad(20) #I guess this could be called max accent?
+    min_decent_angle = -np.deg2rad(10)
+    max_decent_angle = np.deg2rad(10) #I guess this could be called max accent?
 
 
     #list of obstacles
@@ -376,14 +513,14 @@ def main():
     print(obstacles)
 
 
-    spl = min_func_spline_trajectory(p0, pf, v0, vf, k, num_cont_points, lb, ub, v_lower_limit,
+    spl = min_func_spline_trajectory_gradient_free(p0, pf, v0, vf, k, num_cont_points, lb, ub, v_lower_limit,
                               v_upper_limit, a_lower_limit, a_upper_limit, t0, tf_initial,
-                                    num_samples,obstacles,min_decent_angle,max_decent_angle)
+                                    num_samples,obstacles,min_decent_angle,min_decent_angle)
 
     ax = plt.axes(projection='3d')
     plot_spline(spl,100,ax)
     plot_spherical_obsticles(obstacles,ax)
-    plot_velocity_and_acceleration(spl,v_lower_limit,v_upper_limit,a_lower_limit,a_upper_limit,num_samples = 100)
+    plot_constraints(spl,v_lower_limit,v_upper_limit,a_lower_limit,a_upper_limit,min_decent_angle,max_decent_angle,num_samples = 100)
 
     print(get_spline_dist(spl, num_samples))
 
