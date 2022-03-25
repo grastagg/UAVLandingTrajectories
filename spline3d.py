@@ -136,11 +136,11 @@ def spherical_obstalce(obstacles,spl_p):
     # print("z",z)
     return dist
 
-def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
+def min_func_spline_trajectory(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
                               v_upper_limit,a_lower_limit,a_upper_limit,j_lower_limit,j_upper_limit,t0,tf_initial,num_samples,obstacles,min_pitch_angle,max_pitch_angle):
     '''
     :param p0: initial position of the vehicle (x,y,z)
-    :param p1: desired landing position of the vehicle (x,y,z)
+    :param pf: desired landing position of the vehicle (x,y,z)
     :param v0: initial velocity of the vehicle (vx,vy,vz)
     :param vf: landing velocity of the vehicle (vx,vy,vz)
     :param k: order of the b-spline trajectory
@@ -156,29 +156,36 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
     :param num_samples: number of discrete points on spline to check acceleration and velocity
     :return: optimal spline trajectory
     '''
-
+    num_agents = len(p0)
     def objfunc(xdict):
         '''
         :param xdict: dictionary of control variables for the optimizer
         :return: funcs: dictionary of objective and constraints, fail: whether function could be run
         '''
-        nonlocal t0,k,p0,p1,v0,vf,num_samples,obstacles
+        nonlocal t0,k,p0,pf,v0,vf,num_samples,obstacles,num_agents
 
         #extract control points and final time from input dict
         x = xdict["control points"]
-        tf = xdict["tf"][0]
+        tf = xdict["tf"]
 
 
         funcs = {}
 
         #reshape control points
-        x = x.reshape(num_cont_points - 4, len(p0))
+
 
         #create spline from control points and intitial and final conditions
-        spl = create_spline(t0,tf,x,k,p0,p1,v0,vf)
+        splines = []
+        for i in range(num_agents):
+            x_tmp = x[(num_cont_points - 4)*i:(num_cont_points - 4)*i + 3*(num_cont_points - 4)]
+            x_tmp = x_tmp.reshape(num_cont_points - 4, len(p0[i]))
+            tf_tmp = tf[i]
+            spl = create_spline(t0, tf_tmp, x_tmp, k, p0[i], pf[i], v0[i], vf[i])
+            splines.append(spl)
 
+        ##FIXME Start here adding constraints for multiple agents.. need to think about how to index thesex
         #create discrete set of times to sample spline at
-        t = np.linspace(t0, tf, num_samples, endpoint=True)
+        t = np.linspace(t0, tf[0], num_samples, endpoint=True)
 
 
         spl_p = spl(t)
@@ -226,7 +233,7 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
 
         #add objective and constraints to funcs dict
         funcs['dist'] = dist
-        funcs["time"] = tf
+        funcs["time"] = tf[0]
         funcs["velocity"] = v
         funcs['acceleration'] = a
         funcs['jerk'] = j
@@ -240,21 +247,29 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
 
 
 ##fix this trying to create evenely spaced initial intermediate control points
-    x0 = np.zeros(len(p0) * (num_cont_points - 4))
-    dx = (p1[0] - p0[0]) / (num_cont_points - 3)
-    dy = (p1[1] - p0[1]) / (num_cont_points - 3)
-    dz = (p1[2] - p0[2]) / (num_cont_points - 3)
-    x_0 = np.linspace(p0[0] + dx, p1[0] - dx, (num_cont_points - 4))
-    y0 = np.linspace(p0[1] + dy, p1[1] - dy, (num_cont_points - 4))
-    z0 = np.linspace(p0[2] + dz, p1[2] - dz, (num_cont_points - 4))
+    x0 = np.zeros(len(p0[0]) * (num_cont_points - 4) * num_agents)
+    print("x0",x0.shape)
     ind = 0
-    for i in range(len(x_0)):
-        x0[ind] = x_0[i]
-        ind += 1
-        x0[ind] = y0[i]
-        ind += 1
-        x0[ind] = z0[i]
-        ind += 1
+    for i in range(num_agents):
+        dx = (pf[i][0] - p0[i][0]) / (num_cont_points - 3)
+        dy = (pf[i][1] - p0[i][1]) / (num_cont_points - 3)
+        dz = (pf[i][2] - p0[i][2]) / (num_cont_points - 3)
+
+        x_0 = np.linspace(p0[i][0] + dx, pf[i][0] - dx, (num_cont_points - 4))
+        print(len(x_0))
+        y0 = np.linspace(p0[i][1] + dy, pf[i][1] - dy, (num_cont_points - 4))
+        z0 = np.linspace(p0[i][2] + dz, pf[i][2] - dz, (num_cont_points - 4))
+        for j in range(len(x_0)):
+            print("j",j)
+            print("ind", ind)
+            x0[ind] = x_0[j]
+            ind += 1
+            print("ind", ind)
+            x0[ind] = y0[j]
+            ind += 1
+            print("ind", ind)
+            x0[ind] = z0[j]
+            ind += 1
 
     print("x0", x0)
 
@@ -270,7 +285,7 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
     print(lb)
     optProb = Optimization("B-spline landing trajectory", objfunc)
 
-    optProb.addVarGroup(name="control points", nVars=len(p0) * (num_cont_points - 4), varType="c", value=x0, lower=low_b,
+    optProb.addVarGroup(name="control points", nVars=len(p0[0]) * (num_cont_points - 4), varType="c", value=x0, lower=low_b,
                         upper=ub)
     optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf_initial, lower=0,upper=None)
 
@@ -285,22 +300,23 @@ def min_func_spline_trajectory(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_
     optProb.addObj("time")
 
     opt = OPT("ipopt")
+    opt.options['print_level'] = 5
 
     sol = opt(optProb, sens="FD")
 
     print(sol.xStar)
-    c = sol.xStar['control points'].reshape(num_cont_points - 4, len(p0))
-    spl = create_spline(t0,sol.xStar['tf'],c,k,p0,p1,v0,vf)
+    c = sol.xStar['control points'].reshape(num_cont_points - 4, len(p0[0]))
+    spl = create_spline(t0,sol.xStar['tf'][0],c,k,p0[0],pf[0],v0[0],vf[0])
 
     return spl
 
 
-def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
+def min_func_spline_trajectory_gradient_free(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
                               v_upper_limit,a_lower_limit,a_upper_limit,j_lower_limit, j_upper_limit,t0,tf_initial,num_samples,obstacles,min_pitch_angle,max_pitch_angle):
     '''
     This is the function for gradient free optimization of our problem, the constraints are added as penelty terms
     :param p0: initial position of the vehicle (x,y,z)
-    :param p1: desired landing position of the vehicle (x,y,z)
+    :param pf: desired landing position of the vehicle (x,y,z)
     :param v0: initial velocity of the vehicle (vx,vy,vz)
     :param vf: landing velocity of the vehicle (vx,vy,vz)
     :param k: order of the b-spline trajectory
@@ -319,7 +335,7 @@ def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb
 
     def objfunc(x0):
 
-        nonlocal t0, k, p0, p1, v0, vf, num_samples, obstacles, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit,j_lower_limit, j_upper_limit, min_pitch_angle, max_pitch_angle
+        nonlocal t0, k, p0, pf, v0, vf, num_samples, obstacles, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit,j_lower_limit, j_upper_limit, min_pitch_angle, max_pitch_angle
 
         mu = 100
         # extract control points and final time from input dict
@@ -335,7 +351,7 @@ def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb
         x = x.reshape(num_cont_points - 4, len(p0))
 
         # create spline from control points and intitial and final conditions
-        spl = create_spline(t0, tf, x, k, p0, p1, v0, vf)
+        spl = create_spline(t0, tf, x, k, p0, pf, v0, vf)
 
         # create discrete set of times to sample spline at
         t = np.linspace(t0, tf, num_samples, endpoint=True)
@@ -401,12 +417,12 @@ def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb
 
 ##fix this trying to create evenely spaced initial intermediate control points
     x0 = np.zeros(len(p0) * (num_cont_points - 4) + 1) #added 1 so I can add tf variable to end of vector
-    dx = (p1[0] - p0[0]) / (num_cont_points - 3)
-    dy = (p1[1] - p0[1]) / (num_cont_points - 3)
-    dz = (p1[2] - p0[2]) / (num_cont_points - 3)
-    x_0 = np.linspace(p0[0] + dx, p1[0] - dx, (num_cont_points - 4))
-    y0 = np.linspace(p0[1] + dy, p1[1] - dy, (num_cont_points - 4))
-    z0 = np.linspace(p0[2] + dz, p1[2] - dz, (num_cont_points - 4))
+    dx = (pf[0] - p0[0]) / (num_cont_points - 3)
+    dy = (pf[1] - p0[1]) / (num_cont_points - 3)
+    dz = (pf[2] - p0[2]) / (num_cont_points - 3)
+    x_0 = np.linspace(p0[0] + dx, pf[0] - dx, (num_cont_points - 4))
+    y0 = np.linspace(p0[1] + dy, pf[1] - dy, (num_cont_points - 4))
+    z0 = np.linspace(p0[2] + dz, pf[2] - dz, (num_cont_points - 4))
     ind = 0
     for i in range(len(x_0)-1):
         x0[ind] = x_0[i]
@@ -440,7 +456,7 @@ def min_func_spline_trajectory_gradient_free(p0, p1,v0,vf,k, num_cont_points, lb
     print(sol)
     c = sol.x[0:-1].reshape(num_cont_points - 4, len(p0))
     tf = sol.x[-1]
-    spl = create_spline(t0, tf, c, k, p0, p1, v0, vf)
+    spl = create_spline(t0, tf, c, k, p0, pf, v0, vf)
     return spl
 
 
@@ -527,12 +543,30 @@ def main():
     k = 3
 
     #Starting and ending points of the trajectory
-    pf = np.array([0,0,0])
-    p0 = np.array([0,0,20])
+    #first vehicle
+    pf_1 = np.array([0,0,0])
+    p0_1 = np.array([0,0,20])
+
+    #second vehicle
+    pf_2 = np.array([0,0,0])
+    p0_2 = np.array([0,0,25])
+
+    p0 = [p0_1]#[p0_1,p0_2]
+    pf = [pf_1]#[pf_1,pf_2]
 
     #desired starting and ending velocities of the trajectory
-    v0 = np.array([0,-2,0])
-    vf =np.array([0,-5,-.1])
+    #first vehicle
+    v0_1 = np.array([0,-2,0])
+    vf_1 =np.array([0,-5,-.1])
+
+    #second vehicle
+    v0_2 = np.array([0,-2,0])
+    vf_2 =np.array([0,-5,-.1])
+
+    v0 = [v0_1]#[v0_1,v0_2]
+    vf = [vf_1]#[vf_1,vf_2]
+
+
 
     #number of control points for the spline
     num_cont_points = 8
