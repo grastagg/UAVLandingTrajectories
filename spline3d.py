@@ -84,6 +84,42 @@ def plot_spline(spl,num_samples,ax):
     plt.xlabel("x")
     plt.ylabel("y")
 
+def plot_splines(splines,num_samples,ax):
+    colors = ['lime','magenta','blue']
+
+    for i in range(len(splines)):
+        spl = splines[i]
+        control_points = spl.c
+        t0 = spl.t[0]
+        tf = spl.t[-1]
+        t = np.linspace(t0,tf,num_samples,endpoint=True)
+        out = spl(t)
+
+        X = out[:,0]
+        Y = out[:, 1]
+        Z = out[:, 2]
+
+
+
+        max_range = np.array([X.max() - X.min(), Y.max() - Y.min(), Z.max() - Z.min()]).max() / 2.0
+
+        mid_x = (X.max() + X.min()) * 0.5
+        mid_y = (Y.max() + Y.min()) * 0.5
+        mid_z = (Z.max() + Z.min()) * 0.5
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+
+
+        ax.plot3D(control_points[:, 0], control_points[:, 1], control_points[:, 2], 'k--', label='Control polygon', marker='o',
+                 markerfacecolor='red')
+        ax.plot3D(out[:,0], out[:,1],out[:,2],c = colors[i],label = "agent " + str(i))
+    # ax.set_aspect('equal')
+    plt.legend
+    plt.xlabel("x")
+    plt.ylabel("y")
+
 
 def plot_spherical_obsticles(obsticles, ax):
     for i in range(len(obsticles)):
@@ -174,71 +210,89 @@ def min_func_spline_trajectory(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_
         #reshape control points
 
 
-        #create spline from control points and intitial and final conditions
-        splines = []
+
+
+
+
+        v_all = np.array([])
+        a_all = np.array([])
+        j_all = np.array([])
+        obsticle_all = np.array([])
+        pitch_angle_all = np.array([])
+        # t_max = 0
         for i in range(num_agents):
+            # create spline from control points and intitial and final conditions
             x_tmp = x[(num_cont_points - 4)*i:(num_cont_points - 4)*i + 3*(num_cont_points - 4)]
             x_tmp = x_tmp.reshape(num_cont_points - 4, len(p0[i]))
             tf_tmp = tf[i]
             spl = create_spline(t0, tf_tmp, x_tmp, k, p0[i], pf[i], v0[i], vf[i])
-            splines.append(spl)
+            # create discrete set of times to sample spline at
+            t = np.linspace(t0, tf[i], num_samples, endpoint=True)
 
-        ##FIXME Start here adding constraints for multiple agents.. need to think about how to index thesex
-        #create discrete set of times to sample spline at
-        t = np.linspace(t0, tf[0], num_samples, endpoint=True)
+            spl_p = spl(t)
 
+            #evaluate the first derivative of the spline
+            spl_d = spl.derivative(1)(t)
 
-        spl_p = spl(t)
+            #extract derivative in all directions
+            x_dot = spl_d[:,0]
+            y_dot = spl_d[:,1]
+            z_dot = spl_d[:,2]
 
-        #evaluate the first derivative of the spline
-        spl_d = spl.derivative(1)(t)
+            # evaluate the second derivative of the spline
+            spl_dd = spl.derivative(2)(t)
 
-        #extract derivative in all directions
-        x_dot = spl_d[:,0]
-        y_dot = spl_d[:,1]
-        z_dot = spl_d[:,2]
+            x_ddot = spl_dd[:,0]
+            y_ddot = spl_dd[:,1]
+            z_ddot = spl_dd[:,2]
 
-        # evaluate the second derivative of the spline
-        spl_dd = spl.derivative(2)(t)
+            #evaluate the third derivative of the spline
+            spl_ddd = spl.derivative(3)(t)
 
-        x_ddot = spl_dd[:,0]
-        y_ddot = spl_dd[:,1]
-        z_ddot = spl_dd[:,2]
+            x_dddot = spl_ddd[:,0]
+            y_dddot = spl_ddd[:,1]
+            z_dddot = spl_ddd[:,2]
 
-        #evaluate the third derivative of the spline
-        spl_ddd = spl.derivative(3)(t)
+            #euclidean norm of the velocity
+            v = np.sqrt(np.square(x_dot) + np.square(y_dot) + np.square(z_dot))
 
-        x_dddot = spl_ddd[:,0]
-        y_dddot = spl_ddd[:,1]
-        z_dddot = spl_ddd[:,2]
-
-        #euclidean norm of the velocity
-        v = np.sqrt(np.square(x_dot) + np.square(y_dot) + np.square(z_dot))
-
-        #euclidean norm of the accelerations
-        a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
+            v_all = np.concatenate((v_all,v))
 
 
-        j = np.sqrt(np.square(x_dddot) + np.square(y_dddot) + np.square(z_dddot))
+            #euclidean norm of the accelerations
+            a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
 
-        #calculate the distance of the spline
-        dist = get_spline_dist(spl, num_samples)
+            a_all = np.concatenate((a_all,a))
 
-        #check if path is outside obsticales
-        obsticle_dist = spherical_obstalce(obstacles,spl_p)
+            j = np.sqrt(np.square(x_dddot) + np.square(y_dddot) + np.square(z_dddot))
 
-        #calculate the decent angle
-        pitch_angle = np.pi/2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)) , z_dot)
+            j_all = np.concatenate((j_all,j))
+
+            #calculate the distance of the spline
+            # dist = get_spline_dist(spl, num_samples)
+
+            #check if path is outside obsticales
+            obsticle_dist = spherical_obstalce(obstacles,spl_p)
+
+            obsticle_all = np.concatenate((obsticle_all,obsticle_dist))
+
+            #calculate the decent angle
+            pitch_angle = np.pi/2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)) , z_dot)
+            pitch_angle_all = np.concatenate((pitch_angle_all,pitch_angle))
+
+            #
 
 
         #add objective and constraints to funcs dict
-        funcs['dist'] = dist
-        funcs["time"] = tf[0]
-        funcs["velocity"] = v
-        funcs['acceleration'] = a
-        funcs['jerk'] = j
-        funcs['obstacle'] = obsticle_dist
-        funcs['pitch_angle'] = pitch_angle
+        # funcs['dist'] = dist
+        # print(tf)
+        funcs["time"] = np.sum(tf)
+        # print(funcs['time'])
+        funcs["velocity"] = v_all
+        funcs['acceleration'] = a_all
+        funcs['jerk'] = j_all
+        funcs['obstacle'] = obsticle_all
+        funcs['pitch_angle'] = pitch_angle_all
 
         fail = False
 
@@ -285,15 +339,15 @@ def min_func_spline_trajectory(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_
     print(lb)
     optProb = Optimization("B-spline landing trajectory", objfunc)
 
-    optProb.addVarGroup(name="control points", nVars=len(p0[0]) * (num_cont_points - 4), varType="c", value=x0, lower=low_b,
+    optProb.addVarGroup(name="control points", nVars=num_agents * len(p0[0]) * (num_cont_points - 4), varType="c", value=x0, lower=low_b,
                         upper=ub)
-    optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf_initial, lower=0,upper=None)
+    optProb.addVarGroup(name="tf", nVars=num_agents, varType="c", value=tf_initial, lower=0,upper=None)
 
-    optProb.addConGroup("velocity", num_samples, lower=v_lower_limit, upper=v_upper_limit, scale=1.0 / v_upper_limit)
-    optProb.addConGroup("acceleration", num_samples, lower=a_lower_limit, upper=a_upper_limit, scale=1.0 / a_upper_limit)
-    optProb.addConGroup("jerk", num_samples, lower=j_lower_limit, upper=j_upper_limit, scale=1.0 / j_upper_limit)
-    optProb.addConGroup("obstacle", num_samples*len(obstacles), lower=0, upper=None)
-    optProb.addConGroup("pitch_angle", num_samples, lower=min_pitch_angle, upper=max_pitch_angle)
+    optProb.addConGroup("velocity", num_agents*num_samples, lower=v_lower_limit, upper=v_upper_limit, scale=1.0 / v_upper_limit)
+    optProb.addConGroup("acceleration", num_agents * num_samples, lower=a_lower_limit, upper=a_upper_limit, scale=1.0 / a_upper_limit)
+    optProb.addConGroup("jerk", num_agents * num_samples, lower=j_lower_limit, upper=j_upper_limit, scale=1.0 / j_upper_limit)
+    optProb.addConGroup("obstacle", num_agents * num_samples*len(obstacles), lower=0, upper=None)
+    optProb.addConGroup("pitch_angle", num_agents * num_samples, lower=min_pitch_angle, upper=max_pitch_angle)
 
 
 
@@ -304,11 +358,27 @@ def min_func_spline_trajectory(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_
 
     sol = opt(optProb, sens="FD")
 
-    print(sol.xStar)
-    c = sol.xStar['control points'].reshape(num_cont_points - 4, len(p0[0]))
-    spl = create_spline(t0,sol.xStar['tf'][0],c,k,p0[0],pf[0],v0[0],vf[0])
+    print(sol)
 
-    return spl
+    # create spline from control points and intitial and final conditions
+    x = sol.xStar['control points']
+    tf = sol.xStar['tf']
+    splines = []
+    for i in range(num_agents):
+        x_tmp = x[(num_cont_points - 4) * i:(num_cont_points - 4) * i + 3 * (num_cont_points - 4)]
+        x_tmp = x_tmp.reshape(num_cont_points - 4, len(p0[i]))
+        tf_tmp = tf[i]
+        spl = create_spline(t0, tf_tmp, x_tmp, k, p0[i], pf[i], v0[i], vf[i])
+        splines.append(spl)
+
+
+
+
+
+
+    # spl = create_spline(t0,sol.xStar['tf'][0],c,k,p0[0],pf[0],v0[0],vf[0])
+
+    return splines
 
 
 def min_func_spline_trajectory_gradient_free(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_limit,
@@ -460,55 +530,58 @@ def min_func_spline_trajectory_gradient_free(p0, pf,v0,vf,k, num_cont_points, lb
     return spl
 
 
-def plot_constraints(spl, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit,j_lower_limit,j_upper_limit, min_angle, max_angle, num_samples):
-    t0 = spl.t[0]
-    tf = spl.t[-1]
+def plot_constraints(splines, v_lower_limit, v_upper_limit, a_lower_limit, a_upper_limit,j_lower_limit,j_upper_limit, min_angle, max_angle, num_samples):
+    for i in range(len(splines)):
+        spl = splines[i]
+        t0 = spl.t[0]
+        tf = spl.t[-1]
 
-    t = np.linspace(t0,tf,num_samples,endpoint=True)
+        t = np.linspace(t0,tf,num_samples,endpoint=True)
 
-    x_dot = spl.derivative(1)(t)[:, 0]
-    y_dot = spl.derivative(1)(t)[:, 1]
-    z_dot = spl.derivative(1)(t)[:, 2]
+        x_dot = spl.derivative(1)(t)[:, 0]
+        y_dot = spl.derivative(1)(t)[:, 1]
+        z_dot = spl.derivative(1)(t)[:, 2]
 
-    x_ddot = spl.derivative(2)(t)[:, 0]
-    y_ddot = spl.derivative(2)(t)[:, 1]
-    z_ddot = spl.derivative(2)(t)[:, 2]
+        x_ddot = spl.derivative(2)(t)[:, 0]
+        y_ddot = spl.derivative(2)(t)[:, 1]
+        z_ddot = spl.derivative(2)(t)[:, 2]
 
-    x_dddot = spl.derivative(3)(t)[:, 0]
-    y_dddot = spl.derivative(3)(t)[:, 1]
-    z_dddot = spl.derivative(3)(t)[:, 2]
+        x_dddot = spl.derivative(3)(t)[:, 0]
+        y_dddot = spl.derivative(3)(t)[:, 1]
+        z_dddot = spl.derivative(3)(t)[:, 2]
 
-    # norm of the velocity (directionless velocity)
-    v = np.sqrt(np.square(x_dot) + np.square(y_dot) + np.square(z_dot))
+        # norm of the velocity (directionless velocity)
+        v = np.sqrt(np.square(x_dot) + np.square(y_dot) + np.square(z_dot))
 
-    # norm of the accelerations
-    a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
+        # norm of the accelerations
+        a = np.sqrt(np.square(x_ddot) + np.square(y_ddot) + np.square(z_ddot))
 
-    # norm of the jerk
-    j = np.sqrt(np.square(x_dddot) + np.square(y_dddot) + np.square(z_dddot))
+        # norm of the jerk
+        j = np.sqrt(np.square(x_dddot) + np.square(y_dddot) + np.square(z_dddot))
 
-    # calculate the decent angle
-    pitch_angle = np.pi / 2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)), z_dot)
+        # calculate the decent angle
+        pitch_angle = np.pi / 2 - np.arctan2(np.sqrt(np.square(x_dot) + np.square(y_dot)), z_dot)
 
-    fig, axs = plt.subplots(4)
-    axs[0].plot(t,v,c='b')
-    axs[0].plot(t, v_lower_limit*np.ones(len(t)),c='r')
-    axs[0].plot(t, v_upper_limit * np.ones(len(t)),c='r')
-    axs[0].title.set_text("Velocity")
-    axs[1].plot(t, a,c='b')
-    axs[1].plot(t, a_lower_limit*np.ones(len(t)),c='r')
-    axs[1].plot(t, a_upper_limit * np.ones(len(t)),c='r')
-    axs[1].title.set_text("Acceraltion")
-    axs[2].plot(t, j, c='b')
-    axs[2].plot(t, j_lower_limit*np.ones(len(t)),c='r')
-    axs[2].plot(t, j_upper_limit * np.ones(len(t)),c='r')
-    axs[2].title.set_text("Jerk")
-    axs[3].plot(t, pitch_angle,c='b')
-    axs[3].plot(t, min_angle*np.ones(len(t)),c='r')
-    axs[3].plot(t, max_angle * np.ones(len(t)),c='r')
-    axs[3].title.set_text("pitch angle")
-    plt.tight_layout()
-    plt.show()
+        fig, axs = plt.subplots(4)
+        axs[0].plot(t,v,c='b')
+        axs[0].plot(t, v_lower_limit*np.ones(len(t)),c='r')
+        axs[0].plot(t, v_upper_limit * np.ones(len(t)),c='r')
+        axs[0].title.set_text("Velocity")
+        axs[1].plot(t, a,c='b')
+        axs[1].plot(t, a_lower_limit*np.ones(len(t)),c='r')
+        axs[1].plot(t, a_upper_limit * np.ones(len(t)),c='r')
+        axs[1].title.set_text("Acceraltion")
+        axs[2].plot(t, j, c='b')
+        axs[2].plot(t, j_lower_limit*np.ones(len(t)),c='r')
+        axs[2].plot(t, j_upper_limit * np.ones(len(t)),c='r')
+        axs[2].title.set_text("Jerk")
+        axs[3].plot(t, pitch_angle,c='b')
+        axs[3].plot(t, min_angle*np.ones(len(t)),c='r')
+        axs[3].plot(t, max_angle * np.ones(len(t)),c='r')
+        axs[3].title.set_text("pitch angle")
+        plt.tight_layout()
+        plt.suptitle("spline "+str(i))
+        plt.show(block = False)
 
 def get_random_spherical_obsticales(num_obst,x_lim,y_lim,z_lim,min_radius,max_radius):
     '''
@@ -545,14 +618,18 @@ def main():
     #Starting and ending points of the trajectory
     #first vehicle
     pf_1 = np.array([0,0,0])
-    p0_1 = np.array([0,0,20])
+    p0_1 = np.array([0,0,25])
 
     #second vehicle
     pf_2 = np.array([0,0,0])
-    p0_2 = np.array([0,0,25])
+    p0_2 = np.array([0,0,20])
 
-    p0 = [p0_1]#[p0_1,p0_2]
-    pf = [pf_1]#[pf_1,pf_2]
+    #third vehicle
+    pf_3 = np.array([0,0,0])
+    p0_3 = np.array([0,0,30])
+
+    p0 = [p0_1,p0_2,p0_3]
+    pf = [pf_1,pf_2,pf_3]
 
     #desired starting and ending velocities of the trajectory
     #first vehicle
@@ -563,8 +640,12 @@ def main():
     v0_2 = np.array([0,-2,0])
     vf_2 =np.array([0,-5,-.1])
 
-    v0 = [v0_1]#[v0_1,v0_2]
-    vf = [vf_1]#[vf_1,vf_2]
+    #third vehicle
+    v0_3 = np.array([0,-2,0])
+    vf_3 =np.array([0,-5,-.1])
+
+    v0 = [v0_1,v0_2,v0_3]
+    vf = [vf_1,vf_2,vf_3]
 
 
 
@@ -606,20 +687,20 @@ def main():
     z_lim = [3,6]
     min_radius = 4
     max_radius = 5
-    obstacles = get_random_spherical_obsticales(num_obst, x_lim, y_lim, z_lim, min_radius, max_radius)
+    obstacles = []#get_random_spherical_obsticales(num_obst, x_lim, y_lim, z_lim, min_radius, max_radius)
     print(obstacles)
 
 
-    spl = min_func_spline_trajectory(p0, pf, v0, vf, k, num_cont_points, lb, ub, v_lower_limit,
+    splines = min_func_spline_trajectory(p0, pf, v0, vf, k, num_cont_points, lb, ub, v_lower_limit,
                               v_upper_limit, a_lower_limit, a_upper_limit,j_lower_limit,j_upper_limit, t0, tf_initial,
                                     num_samples,obstacles,min_pitch_angle,max_pitch_angle)
 
     ax = plt.axes(projection='3d')
-    plot_spline(spl,100,ax)
+    plot_splines(splines,100,ax)
     plot_spherical_obsticles(obstacles,ax)
-    plot_constraints(spl,v_lower_limit,v_upper_limit,a_lower_limit,a_upper_limit,j_lower_limit,j_upper_limit,min_pitch_angle,max_pitch_angle,num_samples = 100)
-
-    print(get_spline_dist(spl, num_samples))
+    plot_constraints(splines,v_lower_limit,v_upper_limit,a_lower_limit,a_upper_limit,j_lower_limit,j_upper_limit,min_pitch_angle,max_pitch_angle,num_samples = 100)
+    plt.show()
+    # print(get_spline_dist(sp, num_samples))
 
 if __name__ == "__main__":
 
