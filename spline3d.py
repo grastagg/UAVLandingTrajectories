@@ -282,7 +282,7 @@ def min_func_spline_trajectory(p0, pf,v0,vf,k, num_cont_points, lb, ub, v_lower_
         #add objective and constraints to funcs dict
         # funcs['dist'] = dist
         # print(tf)
-        funcs["time"] = np.amax(tf)
+        funcs["time"] = np.sum(np.square(tf))
         # print(funcs['time'])
         funcs["velocity"] = v_all
         funcs['roll_angle'] = roll_angle_all
@@ -624,7 +624,7 @@ def main():
     #Starting and ending points of the trajectory
     #first vehicle
     pf_1 = np.array([0,0,0])
-    p0_1 = np.array([0,0,100])
+    p0_1 = np.array([0,0,20])
 
     #second vehicle
     pf_2 = np.array([0,0,0])
@@ -632,10 +632,10 @@ def main():
 
     #third vehicle
     pf_3 = np.array([0,0,0])
-    p0_3 = np.array([0,0,30])
+    p0_3 = np.array([0,0,20])
 
-    p0 = [p0_1]#,p0_2,p0_3]
-    pf = [pf_1]#,pf_2,pf_3]
+    p0 = [p0_1,p0_2,p0_3]
+    pf = [pf_1,pf_2,pf_3]
 
     #desired starting and ending velocities of the trajectory
     #first vehicle
@@ -650,21 +650,21 @@ def main():
     v0_3 = np.array([0,-2,0])
     vf_3 =np.array([0,-5,-.1])
 
-    v0 = [v0_1]#,v0_2,v0_3]
-    vf = [vf_1]#,vf_2,vf_3]
+    v0 = [v0_1,v0_2,v0_3]
+    vf = [vf_1,vf_2,vf_3]
 
 
 
     #number of control points for the spline
-    num_cont_points = 8
+    num_cont_points = 14
 
     #upper and lower bound for control point values
     lb = -100
     ub = 100
 
     #velocity upper and lower bounds
-    v_lower_limit = 2
-    v_upper_limit = 10
+    v_lower_limit = 1
+    v_upper_limit = 20
 
     #thrust lower and upper bound
     thrust_lower_limit = -17
@@ -674,17 +674,16 @@ def main():
     roll_angle_lower_limit = -np.deg2rad(25)
     roll_angle_upper_limit = np.deg2rad(25)
 
+    #flight path angle lower and upper bounds
+    min_flight_path_angle = -np.deg2rad(20)
+    max_flight_path_angle = np.deg2rad(20)
+
     #starting time of the spine and initial condition for ending time
     t0 = 0
     tf_initial = 1
 
     #number of discrete sampels to break the spline into
-    num_samples = 40
-
-    #decent/accent angle limits
-    min_flight_path_angle = -np.deg2rad(20)
-    max_flight_path_angle = np.deg2rad(20)
-
+    num_samples = 20
 
     #list of obstacles
     num_obst = 1
